@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebSocket PoC - Real-time Chat</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+        Ubuntu, Cantarell, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      padding: 20px;
+    }
+
+    .container {
+      display: flex;
+      gap: 20px;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .main {
+      flex: 1;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      min-height: 600px;
+    }
+
+    .header {
+      padding: 20px;
+      border-bottom: 2px solid #f0f0f0;
+    }
+
+    h1 {
+      color: #333;
+      font-size: 24px;
+      margin-bottom: 5px;
+    }
+
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #999;
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot.connected {
+      background: #4caf50;
+    }
+
+    .status-dot.disconnected {
+      background: #f44336;
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      background: #fafafa;
+    }
+
+    .message {
+      margin-bottom: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      background: white;
+      border-left: 4px solid #667eea;
+    }
+
+    .message.system {
+      background: #f0f0f0;
+      border-left-color: #999;
+      font-style: italic;
+      color: #666;
+    }
+
+    .message-header {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 5px;
+      font-size: 12px;
+    }
+
+    .message-username {
+      font-weight: 600;
+      color: #333;
+    }
+
+    .message-timestamp {
+      color: #999;
+    }
+
+    .message-text {
+      color: #333;
+      word-wrap: break-word;
+    }
+
+    .input-group {
+      padding: 20px;
+      border-top: 2px solid #f0f0f0;
+      display: flex;
+      gap: 10px;
+    }
+
+    input[type='text'] {
+      flex: 1;
+      padding: 12px 15px;
+      border: 2px solid #e0e0e0;
+      border-radius: 6px;
+      font-size: 14px;
+      transition: border-color 0.3s;
+    }
+
+    input[type='text']:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    button {
+      padding: 12px 24px;
+      background: #667eea;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.3s;
+    }
+
+    button:hover {
+      background: #5568d3;
+    }
+
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+
+    .sidebar {
+      width: 280px;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .sidebar-section {
+      padding: 20px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .sidebar-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: #999;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .username-input {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 15px;
+    }
+
+    .username-input input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+
+    .username-input button {
+      padding: 8px 12px;
+      font-size: 13px;
+    }
+
+    .user-list {
+      flex: 1;
+      overflow-y: auto;
+    }
+
+    .user-item {
+      padding: 10px 12px;
+      border-radius: 4px;
+      font-size: 13px;
+      margin-bottom: 6px;
+      background: #f5f5f5;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .user-status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #4caf50;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .stat-card {
+      background: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 18px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #999;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    @media (max-width: 900px) {
+      .container {
+        flex-direction: column;
+      }
+
+      .sidebar {
+        width: 100%;
+        max-height: 300px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="main">
+      <div class="header">
+        <h1>💬 WebSocket Chat</h1>
+        <div class="connection-status">
+          <div class="status-dot connected" id="statusDot"></div>
+          <span id="statusText">Connected</span>
+        </div>
+      </div>
+
+      <div class="messages" id="messagesContainer"></div>
+
+      <div class="input-group">
+        <input
+          type="text"
+          id="messageInput"
+          placeholder="Type a message..."
+          autocomplete="off"
+        />
+        <button onclick="sendMessage()">Send</button>
+      </div>
+    </div>
+
+    <div class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-title">🎯 Join Chat</div>
+        <div class="username-input">
+          <input
+            type="text"
+            id="usernameInput"
+            placeholder="Your name"
+            maxlength="20"
+          />
+          <button onclick="setUsername()">Join</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section" style="flex: 1; overflow: hidden;">
+        <div class="sidebar-title">👥 Active Users</div>
+        <div class="user-list" id="userList">
+          <div style="color: #999; font-size: 13px;">Waiting for users...</div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-title">📊 Statistics</div>
+        <div class="stats">
+          <div class="stat-card">
+            <div class="stat-value" id="userCount">0</div>
+            <div class="stat-label">Connected</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-value" id="messageCount">0</div>
+            <div class="stat-label">Messages</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="client.js"></script>
+</body>
+</html>

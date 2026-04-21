@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  websocket:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: websocket-poc
+    ports:
+      - "3002:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    networks:
+      - ws-network
+
+networks:
+  ws-network:
+    driver: bridge
