@@ -18,13 +18,260 @@ WebSocket provides a persistent, full-duplex connection for real-time communicat
 ┌─────────────┐                      ┌──────────────┐
 │   Client    │                      │    Server    │
 │  ws.send()  │──────────────────────│  Receive &   │
-│             │     WebSocket        │  Broadcast  │
+│             │     WebSocket        │  Broadcast   │
 │ ws.onmsg()  │◄─────────────────────│              │
 │  Display    │    Bi-directional    │              │
 └─────────────┘                      └──────────────┘
 ```
 
-## 🚀 Quick Start
+### Client-Side ws Object
+
+In `public/client.js` (browser):
+```javascript
+const ws = new WebSocket('ws://localhost:3000');
+
+ws.send(JSON.stringify({ type: 'message', text: 'Hi' }));
+//  ↑ Client sends TO server
+
+ws.onmessage = (event) => {
+  //           ↑ Client RECEIVES FROM server
+  console.log(event.data);
+};
+```
+
+### Server-Side ws Object
+
+In `server.js` (Node.js):
+```javascript
+wss.on('connection', (ws) => {
+  //                    ↑ Server's WebSocket object (one per client)
+
+  ws.send(JSON.stringify({ type: 'message', text: 'Hello' }));
+  //  ↑ Server sends TO this client
+
+  ws.on('message', (data) => {
+    //            ↑ Server RECEIVES FROM this client
+    console.log(data);
+  });
+});
+```
+
+### They're Paired
+
+Each WebSocket connection has **TWO paired objects** - one on client, one on server:
+
+```
+┌──────────────────────┐              ┌──────────────────────┐
+│   BROWSER (Client)   │              │   NODE.JS (Server)   │
+├──────────────────────┤              ├──────────────────────┤
+│                      │              │                      │
+│ const ws = new       │   [HTTP      │ wss.on('connection', │
+│ WebSocket(...)       │    Upgrade]  │   (ws) => {})        │
+│       ↓              │              │      ↓               │
+│  Client object   ←───┼──[Persistent─┼──→ Server object     │
+│                  ────┼─  Duplex   ──┼────                  │
+│                      │    Pipe]     │                      │
+│  ws.send() ─────────→│              │← ws.on('message')    │
+│                      │              │                      │
+│  ws.onmessage ←──────│              │← ws.send()           │
+│                      │              │                      │
+└──────────────────────┘              └──────────────────────┘
+```
+
+Both objects are connected via the same persistent WebSocket connection. Think of them like two phone handsets on the same call!
+
+### Key Differences
+
+| Aspect | Client `ws` | Server `ws` |
+|--------|-----------|-----------|
+| **Created** | `new WebSocket()` in browser | Automatically by `ws` library on connection |
+| **Number** | 1 per browser tab | 1 per connected client |
+| **Represents** | Connection to server | Connection to one specific client |
+| **Lifecycle** | Browser tab lifetime | Until client disconnects |
+| **Storage** | Browser memory | Server's `clients` Map |
+| **Access** | Direct (`ws.send()`) | Via `wss.clients` or stored reference |
+
+## � WebSocket Connection Lifecycle
+
+Understanding how a WebSocket connection forms and operates:
+
+### Step-by-Step Flow
+
+1. **Client sends HTTP upgrade request**
+   - Browser initiates: `new WebSocket('ws://localhost:3000')`
+   - Sends HTTP headers with `Upgrade: websocket` and `Connection: Upgrade`
+
+2. **Server receives and validates upgrade**
+   - `ws` library intercepts the HTTP upgrade request
+   - Validates `Sec-WebSocket-Key` header for security
+   - Server code: `wss.on('connection', (ws) => { ... })`
+
+3. **Server responds with 101 Switching Protocols**
+   - HTTP response: `HTTP/1.1 101 Switching Protocols`
+   - Protocol switches from HTTP → WebSocket
+   - Connection becomes persistent and duplex
+
+4. **Persistent connection established**
+   - Both client and server now have connection objects
+   - Client: `ws` object created
+   - Server: `ws` parameter in connection handler
+   - Connection stored in server's `clients` Map
+
+5. **Bi-directional message exchange**
+   - Client sends: `ws.send(JSON.stringify({...}))`
+   - Server receives: `ws.on('message', (data) => { ... })`
+   - Server sends: `ws.send(JSON.stringify({...}))`
+   - Client receives: `ws.onmessage = (event) => { ... }`
+   - Both directions work simultaneously
+
+6. **Connection active until client/server closes**
+   - Connection stays open indefinitely
+   - Server tracks in `clients` Map
+   - Either side can send data anytime
+   - On disconnect: `ws.on('close')` or `ws.onclose` fires
+   - Server removes client from Map: `clients.delete(ws)`
+
+### Timeline Diagram
+
+```
+[BROWSER CLIENT]                        [NODE.JS SERVER]
+      |                                        |
+      |--- HTTP GET + Upgrade headers -------->|
+      |                                        |
+      |                                   ws.on('connection')
+      |                                   (validate, accept)
+      |                                        |
+      |<---- HTTP 101 Switching Protocols -----|
+      |                                        |
+   [Handshake Complete]              [Handshake Complete]
+      |                                        |
+   ws object ready                    ws object ready
+      |                                        |
+      | const ws = new                 wss.clients.set(ws, data)
+      | WebSocket(...)                         |
+      |                                        |
+      |--- ws.send(msg) ---------------------->|
+      |                                  ws.on('message')
+      |                                  process message
+      |                                        |
+      |<---- ws.send(response) ----------------|
+      | ws.onmessage receives                  |
+      |                                        |
+    [Messages exchanged continuously]
+      |                                        |
+      | ws.close() or page unload              |
+      |                                  ws.on('close')
+      |                                  clients.delete(ws)
+      |
+[Connection Closed]                [Connection Closed]
+```
+
+### Code Implementation
+
+**Client-side (public/client.js):**
+```javascript
+// Step 1: Client sends upgrade request
+const ws = new WebSocket('ws://localhost:3000');
+
+// Step 3 & 4: Server accepts, connection ready
+ws.onopen = () => {
+  console.log('Connected!');
+  // Step 5: Send messages
+  ws.send(JSON.stringify({ type: 'presence', username: 'Alice' }));
+};
+
+// Step 5: Receive messages
+ws.onmessage = (event) => {
+  const message = JSON.parse(event.data);
+  console.log('Received:', message);
+};
+
+// Step 6: Handle disconnect
+ws.onclose = () => {
+  console.log('Disconnected');
+};
+```
+
+**Server-side (server.js):**
+```javascript
+// Step 2 & 3: Server validates and accepts upgrade
+wss.on('connection', (ws) => {
+  // Step 4: Connection established
+  clients.set(ws, { id: generateClientId(), username: null });
+  
+  // Step 5: Receive messages
+  ws.on('message', (data) => {
+    const message = JSON.parse(data);
+    broadcast(message);  // Send to all clients
+  });
+  
+  // Step 6: Handle disconnect
+  ws.on('close', () => {
+    clients.delete(ws);  // Clean up
+  });
+});
+```
+## 📌 Event Listener Pattern
+
+Understanding how event listeners work across Node.js and JavaScript:
+
+### Event Listener Registration
+
+Register an event listener on an object: When the specified event is emitted/triggered, execute the callback function with the event data as a parameter.
+
+More formally: **Bind a callback function to an event on an object. Upon event emission, the callback executes with event data.**
+
+### Pattern
+
+```javascript
+object.on('eventName', (eventData) => {
+  // This callback executes when 'eventName' is emitted
+});
+```
+
+### Terminology
+
+| Part | Term | Explanation |
+|------|------|-------------|
+| `object` | **Event Emitter** | Any object with `.on()` method |
+| `.on()` | **Event Listener Method** | Method that registers the listener |
+| `'eventName'` | **Event Identifier** | Specifies which event to listen for |
+| `(eventData)` | **Event Parameter** | Data passed by the event |
+| `=> { ... }` | **Callback Function** | Code executed when event fires |
+
+### Applicable to Any Domain
+
+The same pattern works across different domains:
+
+```javascript
+// DOM/Browser Events
+button.on('click', (event) => {
+  console.log('Button clicked');
+});
+
+// Node.js File System
+fileStream.on('data', (chunk) => {
+  console.log('Data received:', chunk);
+});
+
+// Node.js Process Events
+process.on('exit', (code) => {
+  console.log('Process exiting with code:', code);
+});
+
+// WebSocket Events (this project)
+ws.on('message', (data) => {
+  console.log('Message received:', data);
+});
+
+// Custom Events
+emitter.on('custom', (payload) => {
+  console.log('Custom event triggered:', payload);
+});
+```
+
+All follow the same **event listener registration pattern** - object, method, event name, callback!
+## �🚀 Quick Start
 
 ### Prerequisites
 
